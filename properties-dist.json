@@ -1,0 +1,13 @@
+{
+    "aws" : {
+        "region": "sa-east-1",
+        "firehose_delivery_stream_name": ""     
+    },
+    "google" : {
+        "spreadsheet_api_version": "v4",
+        "spreadsheets_scope": "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "spreadsheet_id": "",
+        "spreadsheet_range": ""         
+    }        
+           
+}
