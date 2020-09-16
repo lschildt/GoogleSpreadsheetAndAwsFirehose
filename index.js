@@ -41,7 +41,7 @@ async function getGoogleSheetsData() {
 					});
 					resolve(emails)
 				} else {
-					console.log('No data found.')
+					reject('Spreadsheets - No data found.')
 				}
 			});
 		} catch (err) {
