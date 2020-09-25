@@ -5,7 +5,34 @@ const aws = require("aws-sdk")
 aws.config.update({ region: properties.aws.region });
 const firehose = new aws.Firehose();
 const scopes = [properties.google.spreadsheets_scope];
+
 const auth = new google.auth.JWT(key.client_email, null, key.private_key, scopes)
+
+const secretsManager = new aws.SecretsManager({
+	region : properties.region
+});
+
+async function getAwsGoogleApiSecret() {
+	try {
+	  const data = await secretsManager.getSecretValue({
+		SecretId: properties.aws.secret_name,
+	  }).promise();
+  
+	  if (data) {
+		if (data.SecretString) {
+			console.log('teste')
+		  const secret = data.SecretString;
+		  const parsedSecret = JSON.parse(secret);
+		  return parsedSecret['private_key']
+		}
+		return false
+	  }
+	} catch (error) {
+	  console.log('Error retrieving secrets');
+	  console.log(error);
+	}
+	return false
+}
 
 async function authorizeGoogleSheets() {
 	let result = await new Promise((resolve, reject) => {
@@ -102,6 +129,17 @@ async function putRecordsFirehose(page) {
 }
 
 exports.handler = async (event) => {
+
+	var googleApiPrivateKey = await getAwsGoogleApiSecret()
+	if(googleApiPrivateKey) {
+		console.log('private_key ' + googleApiPrivateKey)		
+		return googleApiPrivateKey
+	} 
+	return false
+
+
+/*
+
 	return authorizeGoogleSheets()
 		.then(() => getGoogleSheetsData())
 		.then(data => getDataPagesToFirehose(data))
@@ -109,4 +147,5 @@ exports.handler = async (event) => {
 			return sendDataPagesToFirehose(pages)
 		})
 		.catch(error => console.log(error));
+*/
 }

@@ -1,7 +1,9 @@
 {
     "aws" : {
         "region": "sa-east-1",
-        "firehose_delivery_stream_name": ""     
+        "firehose_delivery_stream_name": "",
+        "secretName": "",
+        "secret_private_key": "private_key"
     },
     "google" : {
         "spreadsheet_api_version": "v4",
