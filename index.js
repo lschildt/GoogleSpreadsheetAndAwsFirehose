@@ -6,7 +6,7 @@ aws.config.update({ region: properties.aws.region });
 const firehose = new aws.Firehose();
 const scopes = [properties.google.spreadsheets_scope];
 
-const auth = new google.auth.JWT(key.client_email, null, key.private_key, scopes)
+var googleAuth = null;
 
 const secretsManager = new aws.SecretsManager({
 	region : properties.region
@@ -20,10 +20,9 @@ async function getAwsGoogleApiSecret() {
   
 	  if (data) {
 		if (data.SecretString) {
-			console.log('teste')
 		  const secret = data.SecretString;
 		  const parsedSecret = JSON.parse(secret);
-		  return parsedSecret['private_key']
+		  return Buffer.from(parsedSecret['private_key'], 'base64').toString('ascii')
 		}
 		return false
 	  }
@@ -34,9 +33,10 @@ async function getAwsGoogleApiSecret() {
 	return false
 }
 
-async function authorizeGoogleSheets() {
+async function authorizeGoogleSheets(googleApiPrivateKey) {
+	googleAuth = new google.auth.JWT(key.client_email, null, googleApiPrivateKey, scopes)
 	let result = await new Promise((resolve, reject) => {
-		auth.authorize(function (err, tokens) {
+		googleAuth.authorize(function (err, tokens) {
 			if (err) {
 				reject(err)
 			} else {
@@ -54,7 +54,7 @@ async function getGoogleSheetsData() {
 			let emails = new Array()
 			const sheets = google.sheets({
 				version: properties.google.spreadsheet_api_version,
-				auth
+				auth: googleAuth
 			});
 			sheets.spreadsheets.values.get({
 				spreadsheetId: properties.google.spreadsheet_id,
@@ -130,22 +130,16 @@ async function putRecordsFirehose(page) {
 
 exports.handler = async (event) => {
 
-	var googleApiPrivateKey = await getAwsGoogleApiSecret()
+	var googleApiPrivateKey = await getAwsGoogleApiSecret()	
 	if(googleApiPrivateKey) {
-		console.log('private_key ' + googleApiPrivateKey)		
-		return googleApiPrivateKey
+		return authorizeGoogleSheets(googleApiPrivateKey)
+				.then(() => getGoogleSheetsData())
+				.then(data => getDataPagesToFirehose(data))
+				.then(pages => {
+					return sendDataPagesToFirehose(pages)
+				})
+				.catch(error => console.log(error))
 	} 
 	return false
 
-
-/*
-
-	return authorizeGoogleSheets()
-		.then(() => getGoogleSheetsData())
-		.then(data => getDataPagesToFirehose(data))
-		.then(pages => {
-			return sendDataPagesToFirehose(pages)
-		})
-		.catch(error => console.log(error));
-*/
 }
