@@ -108,9 +108,10 @@ async function sendDataPagesToFirehose(pages) {
 
 async function putRecordsFirehose(page) {
 	let result = await new Promise((resolve, reject) => {
+		let timestamp = new Date()
 		let records = Array()
 		for (const row of page) {
-			records.push({ Data: Buffer.from(JSON.stringify({'email': row})) })
+			records.push({ Data: Buffer.from(JSON.stringify({'email': row, 'created_at': timestamp}))})
 		}
 		firehose.putRecordBatch({
 			DeliveryStreamName: properties.aws.firehose_delivery_stream_name,
@@ -129,7 +130,6 @@ async function putRecordsFirehose(page) {
 }
 
 exports.handler = async (event) => {
-
 	var googleApiPrivateKey = await getAwsGoogleApiSecret()	
 	if(googleApiPrivateKey) {
 		return authorizeGoogleSheets(googleApiPrivateKey)
