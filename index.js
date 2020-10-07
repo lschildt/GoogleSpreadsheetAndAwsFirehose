@@ -1,28 +1,32 @@
 const { google } = require('googleapis')
-const key = require('./auth.json')
 const properties = require('./properties.json')
+const key = require('./auth.json')
+const scopes = [properties.google.spreadsheets_scope];
+var fs = require('fs');
+var redshift = require('./redshift');
 const aws = require("aws-sdk")
 aws.config.update({ region: properties.aws.region });
-const firehose = new aws.Firehose();
-const scopes = [properties.google.spreadsheets_scope];
+var _secrets;
 
-var googleAuth = null;
 
 const secretsManager = new aws.SecretsManager({
 	region : properties.region
 });
 
-async function getAwsGoogleApiSecret() {
+async function getAwsSecrets() {
 	try {
 	  const data = await secretsManager.getSecretValue({
 		SecretId: properties.aws.secret_name,
 	  }).promise();
   
 	  if (data) {
-		if (data.SecretString) {
-		  const secret = data.SecretString;
-		  const parsedSecret = JSON.parse(secret);
-		  return Buffer.from(parsedSecret['private_key'], 'base64').toString('ascii')
+		if (data.SecretString) {			
+			const secret = data.SecretString;
+			const parsedSecret = JSON.parse(secret);
+			return {
+					google_api_private_key : Buffer.from(parsedSecret[properties.aws.secret_private_key], 'base64').toString('ascii'),
+					redshift_connection_string : parsedSecret[properties.aws.secret_redshift_connection_string]
+				}
 		}
 		return false
 	  }
@@ -61,12 +65,8 @@ async function getGoogleSheetsData() {
 				range: properties.google.spreadsheet_range,
 			}, (err, res) => {
 				if (err) reject(err)
-				const rows = res.data.values
-				if (rows.length) {
-					rows.map((row) => {
-						emails.push(row[0])
-					});
-					resolve(emails)
+				if (res.data.values) {
+					resolve(res.data.values)
 				} else {
 					reject('Spreadsheets - No data found.')
 				}
@@ -78,68 +78,53 @@ async function getGoogleSheetsData() {
 	return result
 }
 
-function getDataPagesToFirehose(data) {
-	// Each PutRecordBatch request supports up to 500 records.
-	let pages = Array()
-	let totalPages = Math.ceil(data.length / 500)
-	let startPos = 0
-	let endPos = 500
-	for (let i = 0; i < totalPages; i++) {
-		let dataPage = data.slice(startPos, endPos)
-		pages.push(dataPage)
-		startPos += 500
-		endPos += 500
+function getDataToJson(data) {
+	if (rows.length) {
+		rows.map((row) => {
+			emails.push(row[0])
+		});
+		resolve(emails)
 	}
-	return pages
 }
 
-async function sendDataPagesToFirehose(pages) {
+function getDataCsv(data) {
+	var csv = rows.map(function(d){
+		return d.join();
+	}).join('\n');
+}
+
+async function sendDataToRedshift(connectionString, data) {
 	let result = await new Promise((resolve, reject) => {
-		const promises = []
-		pages.map((page) => {
-			promises.push(putRecordsFirehose(page))
-		})
-		Promise.all(promises)
-			.then(response => resolve(response))
-			.catch(error => reject(error))
+		redshift.connect(connectionString)
+			.then(() => redshift.deleteAllRows())
+			.then(() => redshift.insertMultipleRows(data))
+			.then(() => redshift.disconnect())
+			.then((result) => { if(result) resolve(true) })
+			.catch((err) => { reject(err) })			
 	})
 	return result
-}
+};
 
-async function putRecordsFirehose(page) {
-	let result = await new Promise((resolve, reject) => {
-		let timestamp = new Date()
-		let records = Array()
-		for (const row of page) {
-			records.push({ Data: Buffer.from(JSON.stringify({'email': row, 'created_at': timestamp}))})
-		}
-		firehose.putRecordBatch({
-			DeliveryStreamName: properties.aws.firehose_delivery_stream_name,
-			Records: records
-		}, (err, data) => {
-			if (err) {
-				console.log(err, err.stack);
-				reject(false);
-			} else {
-				console.log("success | put " + records.length + " records");					
-				resolve(true);
-			}
-		})
-	})
-	return result
-}
+exports.handler = async (event) => {		
+	//var secrets = getAwsSecrets().promise()	
+	//if(secrets) {						
 
-exports.handler = async (event) => {
-	var googleApiPrivateKey = await getAwsGoogleApiSecret()	
-	if(googleApiPrivateKey) {
-		return authorizeGoogleSheets(googleApiPrivateKey)
-				.then(() => getGoogleSheetsData())
-				.then(data => getDataPagesToFirehose(data))
-				.then(pages => {
-					return sendDataPagesToFirehose(pages)
-				})
-				.catch(error => console.log(error))
-	} 
+		/*return getAwsSecrets()
+		.then( (secrets) => {
+			_secrets = secrets;
+			authorizeGoogleSheets(key.private_key) 
+			//authorizeGoogleSheets(_secrets['google_api_private_key']) 
+		})*/
+		return authorizeGoogleSheets(key.private_key) 
+		.then(() => getGoogleSheetsData())
+		.then((data) =>  {
+				var connectionString = "redshift://leandro:B0ler019$@schildt.cn6gpsja7am1.sa-east-1.redshift.amazonaws.com:5439/spredsheet2";
+				return sendDataToRedshift(connectionString, data)
+				//return sendDataToRedshift(_secrets['redshift_connection_string'], data)
+			}		
+		).catch(error => console.log(error));
+	//}
 	return false
-
 }
+
+console.log('return ' + exports.handler())
